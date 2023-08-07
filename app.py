@@ -2,7 +2,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from flask_migrate import Migrate
 from models import *
-from flask_socketio import SocketIO, send, emit, join_room
+from flask_socketio import SocketIO, send, emit, join_room, leave_room
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
@@ -86,7 +86,7 @@ def game():
             db.session.commit()
             
             # Create Gamemaster Player
-            gm_player = Player(user_id=current_user.id, game_id=new_game.id, role="Gamemaster")
+            gm_player = Player(user_id=current_user.id, game_id=new_game.id, name="Gamemaster", role="Gamemaster")
             db.session.add(gm_player)
             db.session.commit()
             
@@ -95,6 +95,7 @@ def game():
         elif 'join_game' in request.form:
             game_id = request.form['game_id']
             game_password = request.form['game_password']
+            player_name = request.form['player_name']
             game = Game.query.get(game_id)
             
             if game and game.check_password(game_password):
@@ -102,7 +103,7 @@ def game():
                 existing_player = Player.query.filter_by(user_id=current_user.id, game_id=game.id).first()
                 
                 if not existing_player:
-                    new_player = Player(user_id=current_user.id, game_id=game.id, role="Adventurer")
+                    new_player = Player(user_id=current_user.id, game_id=game.id, role="Adventurer", name=player_name)
                     db.session.add(new_player)
                     db.session.commit()
                     
@@ -119,6 +120,9 @@ def game():
 
 
 
+
+
+
 @app.route('/game_session/<int:game_id>', methods=['GET', 'POST'])
 @login_required
 def game_session(game_id):
@@ -130,6 +134,7 @@ def game_session(game_id):
     
     # Check if the current user is a part of this game
     player = Player.query.filter_by(user_id=current_user.id, game_id=game.id).first()
+    players = Player.query.filter_by(game_id=game.id).all()
     if not player:
         flash('You are not a part of this game.', 'warning')
         return redirect(url_for('game'))
@@ -145,7 +150,7 @@ def game_session(game_id):
     n = 10  # or however many messages you want
     messages = GameMessage.query.filter_by(game_id=game.id).order_by(GameMessage.timestamp.desc()).limit(n).all()
 
-    return render_template('game_session.html', game=game, player=player, messages=messages)
+    return render_template('game_session.html', game=game, player=player, messages=messages, players=players)
 
 
 @limiter.limit("1 per 3 seconds")
@@ -166,6 +171,14 @@ def handle_message(data):
 def on_join(data):
     room = "game_" + data['game_id']
     join_room(room)
+    emit('player_online', {'player_id': current_user.id}, room=room)
+
+@socketio.on('leave')
+def on_leave(data):
+    room = "game_" + data['game_id']
+    leave_room(room)
+    emit('player_offline', {'player_id': current_user.id}, room=room)
+
 
 
 ### Run App ###

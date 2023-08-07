@@ -32,43 +32,28 @@
 </form>
 
 
+
 <h3>Players in Game:</h3>
-<table border="1">
+<table class="table">
     <thead>
         <tr>
-            <th>Player Name</th>
-            <th>Role</th>
+            <th>Name</th>
+            <th>Health</th>
             <th>Status</th>
         </tr>
     </thead>
     <tbody>
         {% for p in players %}
         <tr>
-            <td>{{ p.user.username }}</td>
-            <td>{{ p.role }}</td>
-            <td class="player-status" data-player-id="{{ p.id }}">Disconnected</td>  <!-- Default state -->
+            <td>{{ p.name }}</td>
+            <td>{{ p.health }}</td>
+            <td id="status_{{ p.id }}">Offline</td> <!-- Default to offline, will update via Socket.IO -->
         </tr>
         {% endfor %}
     </tbody>
 </table>
 
-<h3>Entities in Game:</h3>
-<table border="1">
-    <thead>
-        <tr>
-            <th>Entity Name</th>
-            <th>Current Health</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for entity_instance in entity_instances %}
-        <tr>
-            <td>{{ entity_instance.base_entity.name }}</td>
-            <td>{{ entity_instance.current_health }}</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
+
 
 <!-- Include Socket.IO JavaScript -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
@@ -133,21 +118,16 @@ socket.on('new_message', function(data) {
     typeCharacter();
 });
 
-    // When a player connects
-    socket.on('player_connected', function(data) {
-        var statusElement = document.querySelector('.player-status[data-player-id="' + data.player_id + '"]');
-        if (statusElement) {
-            statusElement.textContent = 'Connected';
-        }
-    });
+// ... existing code ...
 
-    // When a player disconnects
-    socket.on('player_disconnected', function(data) {
-        var statusElement = document.querySelector('.player-status[data-player-id="' + data.player_id + '"]');
-        if (statusElement) {
-            statusElement.textContent = 'Disconnected';
-        }
-    });
+socket.on('player_online', function(data) {
+    document.getElementById("status_" + data.player_id).innerText = "Online";
+});
+
+socket.on('player_offline', function(data) {
+    document.getElementById("status_" + data.player_id).innerText = "Offline";
+});
+
 
 </script>
 
