@@ -1,11 +1,7 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login</title>
-</head>
-<body>
+{% extends "layout.html" %}
+
+{% block content %}
+
     <h2>Login</h2>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -27,5 +23,5 @@
         <input type="submit" value="Login">
     </form>
     <a href="/">Back to Home</a>
-</body>
-</html>
+
+{% endblock %}
