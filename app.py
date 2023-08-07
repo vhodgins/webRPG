@@ -3,13 +3,17 @@ from flask_login import LoginManager, login_user, login_required, logout_user, c
 from flask_migrate import Migrate
 from models import *
 from flask_socketio import SocketIO, send, emit, join_room
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 app = Flask(__name__)
 socketio = SocketIO(app)
 app.config['SECRET_KEY'] = 'mysecretkey'  # You should set this to a random string in a real application
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://wackyschemes:B0nerometrics@localhost/rpg_game_db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
 migrate = Migrate(app, db)
+limiter = Limiter(app, key_func=get_remote_address)
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -138,11 +142,13 @@ def game_session(game_id):
         db.session.commit()
 
     # Retrieve the last n messages
-    n = 20  # or however many messages you want
+    n = 10  # or however many messages you want
     messages = GameMessage.query.filter_by(game_id=game.id).order_by(GameMessage.timestamp.desc()).limit(n).all()
 
     return render_template('game_session.html', game=game, player=player, messages=messages)
 
+
+@limiter.limit("1 per 3 seconds")
 @socketio.on('send_message')
 def handle_message(data):
     # Save the message to the database (if you wish to persist it)

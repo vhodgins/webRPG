@@ -35,6 +35,60 @@ class Player(db.Model):
     game_id = db.Column(db.Integer, db.ForeignKey('game.id'), nullable=False)
     role = db.Column(db.String(20), nullable=False)  # Either 'Gamemaster' or 'Adventurer'
     messages = db.relationship('GameMessage', back_populates='player')
+    
+    name = db.Column(db.String(50), nullable=False, default="")
+    health = db.Column(db.Integer, nullable=False, default=100)
+    strength = db.Column(db.Integer, nullable=False, default=10)
+    mana = db.Column(db.Integer, nullable=False, default=50)
+    
+    # Relationship to manage player's inventory items
+    inventory_items = db.relationship('InventoryItem', backref='owner', lazy=True)
+
+
+class Item(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    script = db.Column(db.Text, nullable=True)  # for the command scripts
+    attack_power = db.Column(db.Integer, default=0, nullable=False)
+
+
+class InventoryItem(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    player_id = db.Column(db.Integer, db.ForeignKey('player.id'), nullable=False)
+    item_id = db.Column(db.Integer, db.ForeignKey('item.id'), nullable=False)
+    quantity = db.Column(db.Integer, default=1, nullable=False)
+
+    # Relationship to reference the actual item
+    item = db.relationship('Item', backref='inventory_instances', lazy=True)
+
+
+class Entity(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), nullable=False)
+    health = db.Column(db.Integer, default=100, nullable=False)
+    attack = db.Column(db.Integer, default=10, nullable=False)
+    defense = db.Column(db.Integer, default=5, nullable=False)
+    script = db.Column(db.Text, nullable=True)  # for the command scripts or interactions
+
+class GameContext(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    game_id = db.Column(db.Integer, db.ForeignKey('game.id'), nullable=False)
+    
+    # Relationship to manage entity instances in this game context
+    entities = db.relationship('EntityInstance', backref='game_context', lazy=True)
+
+class EntityInstance(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    entity_id = db.Column(db.Integer, db.ForeignKey('entity.id'), nullable=False)
+    game_context_id = db.Column(db.Integer, db.ForeignKey('game_context.id'), nullable=False)
+    
+    current_health = db.Column(db.Integer, nullable=False)
+    # Add other attributes as needed (e.g., current_attack, current_defense)
+    
+    # Relationship to reference the base entity
+    base_entity = db.relationship('Entity', backref='instances', lazy=True)
+
 
 
 class GameMessage(db.Model):

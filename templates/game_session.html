@@ -1,6 +1,17 @@
 {% extends "layout.html" %}
 
 {% block content %}
+
+<style>
+    .message-history {
+    height: 300px;  /* Adjust as needed */
+    overflow-y: scroll;
+    border: 1px solid #ccc;
+    padding: 10px;
+    margin-bottom: 20px;
+}
+</style>
+
 <h2>{{ game.title }}</h2>
 
 <p>Welcome, {{ player.role }}!</p>
@@ -20,6 +31,45 @@
     <input type="submit" value="Submit Command">
 </form>
 
+
+<h3>Players in Game:</h3>
+<table border="1">
+    <thead>
+        <tr>
+            <th>Player Name</th>
+            <th>Role</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for p in players %}
+        <tr>
+            <td>{{ p.user.username }}</td>
+            <td>{{ p.role }}</td>
+            <td class="player-status" data-player-id="{{ p.id }}">Disconnected</td>  <!-- Default state -->
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<h3>Entities in Game:</h3>
+<table border="1">
+    <thead>
+        <tr>
+            <th>Entity Name</th>
+            <th>Current Health</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for entity_instance in entity_instances %}
+        <tr>
+            <td>{{ entity_instance.base_entity.name }}</td>
+            <td>{{ entity_instance.current_health }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
 <!-- Include Socket.IO JavaScript -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 <script type="text/javascript">
@@ -28,23 +78,79 @@
     // Emit join event to join the correct game room
     socket.emit('join', {'game_id': '{{ game.id }}'});
 
-    // Handle form submission
     var form = document.querySelector("form");
-    form.addEventListener("submit", function(event) {
-        event.preventDefault();
-        var messageContent = document.querySelector("textarea[name='command']").value;
-        socket.emit('send_message', {'game_id': '{{ game.id }}', 'user': '{{ player.user.username }}', 'content': messageContent});
-        document.querySelector("textarea[name='command']").value = '';  // Clear the input field
+    var textarea = document.querySelector("textarea[name='command']");
+
+    textarea.addEventListener('keypress', function(event) {
+        // Check if the pressed key is the return/enter key and the shift key is not pressed
+        if (event.keyCode === 13 && !event.shiftKey) {
+            event.preventDefault();  // prevent newline insertion
+            form.dispatchEvent(new Event('submit'));  // trigger the form submission
+        }
     });
 
-    socket.on('new_message', function(data) {
-        // Append the new message to the message history div
-        var messageDiv = document.querySelector(".message-history");
-        var newMessage = document.createElement("div");
-        newMessage.innerHTML = "<strong>" + data.user + ":</strong> " + data.content;
-        messageDiv.appendChild(newMessage);
+    form.addEventListener("submit", function(event) {
+    event.preventDefault();
+
+    var messageContent = textarea.value;
+    
+    // Disable textarea and send button for 3 seconds after sending a message
+    textarea.disabled = true;
+    setTimeout(function() {
+        textarea.disabled = false;
+        textarea.focus();
+    }, 3000);  // 3 seconds
+
+    socket.emit('send_message', {'game_id': '{{ game.id }}', 'user': '{{ player.user.username }}', 'content': messageContent});
+    textarea.value = '';  // Clear the input field
+});
+
+socket.on('new_message', function(data) {
+    // Create the new message element
+    var newMessage = document.createElement("div");
+    newMessage.innerHTML = "<strong>" + data.user + ":</strong> ";
+
+    // Append the new message element to the message history div
+    var messageDiv = document.querySelector(".message-history");
+    messageDiv.appendChild(newMessage);
+
+    // Scroll to the bottom immediately after appending the new message
+    messageDiv.scrollTop = messageDiv.scrollHeight;
+
+    // Type out the message content with a typewriter effect
+    var content = data.content;
+    var index = 0;
+    var typingSpeed = 10;  // Adjust the speed as needed
+
+    function typeCharacter() {
+        if (index < content.length) {
+            newMessage.innerHTML += content.charAt(index);
+            index++;
+            setTimeout(typeCharacter, typingSpeed);
+        }
+    }
+
+    typeCharacter();
+});
+
+    // When a player connects
+    socket.on('player_connected', function(data) {
+        var statusElement = document.querySelector('.player-status[data-player-id="' + data.player_id + '"]');
+        if (statusElement) {
+            statusElement.textContent = 'Connected';
+        }
     });
+
+    // When a player disconnects
+    socket.on('player_disconnected', function(data) {
+        var statusElement = document.querySelector('.player-status[data-player-id="' + data.player_id + '"]');
+        if (statusElement) {
+            statusElement.textContent = 'Disconnected';
+        }
+    });
+
 </script>
+
 
 
 
