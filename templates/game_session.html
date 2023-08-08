@@ -10,48 +10,81 @@
     padding: 10px;
     margin-bottom: 20px;
 }
+
+.system-message {
+    color: red;  /* Or any style you prefer for system messages */
+}
+
 </style>
 
-<h2>{{ game.title }}</h2>
+<div class="container mt-4">
+    <h2>{{ game.title }}</h2>
 
-<p>Welcome, {{ player.role }}!</p>
-
-<h3>Message History:</h3>
-<div class="message-history">
-    {% for message in messages|reverse %}
+    <div class="message-history mb-4">
+        {% for message in messages|reverse %}
         <div class="message">
-            <strong>{{ message.player.user.username }}:</strong> {{ message.content }}
+            <strong>{{ message.player.user.username }}:</strong> 
+            {% if message.player.user.username == 'System' %}
+                <span class="system-message">{{ message.content }}</span>
+            {% else %}
+                {{ message.content }}
+            {% endif %}
         </div>
     {% endfor %}
+    </div>
+    <form action="{{ url_for('game_session', game_id=game.id) }}" method="post" class="mb-4">
+        <div class="form-group">
+            <textarea name="command" class="form-control" rows="2" placeholder="Enter your command..."></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">Submit Command</button>
+    </form>
+
+    <div class="row">
+        <div class="col-md-6">
+            <h3>Players in Game:</h3>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Health</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in players %}
+                    <tr>
+                        <td>{{ p.name }}</td>
+                        <td>{{ p.health }}</td>
+                        <td id="status_{{ p.id }}">Offline</td> <!-- Default to offline, will update via Socket.IO -->
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="col-md-6">
+            <h3>Entities in Game:</h3>
+            <table class="table" id="entities-tbody">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Current Health</th>
+                        <!-- You can add other attributes like Attack, Defense, etc. -->
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for entity_instance in entity_instances %}
+                    <tr>
+                        <td>{{ entity_instance.base_entity.name }}</td>
+                        <td>{{ entity_instance.current_health }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
-<h3>Game Command Prompt:</h3>
-<form action="{{ url_for('game_session', game_id=game.id) }}" method="post">
-    <textarea name="command" rows="4" cols="50" placeholder="Enter your command..."></textarea><br>
-    <input type="submit" value="Submit Command">
-</form>
-
-
-
-<h3>Players in Game:</h3>
-<table class="table">
-    <thead>
-        <tr>
-            <th>Name</th>
-            <th>Health</th>
-            <th>Status</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for p in players %}
-        <tr>
-            <td>{{ p.name }}</td>
-            <td>{{ p.health }}</td>
-            <td id="status_{{ p.id }}">Offline</td> <!-- Default to offline, will update via Socket.IO -->
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
 
 
 
@@ -60,8 +93,10 @@
 <script type="text/javascript">
     var socket = io.connect('http://' + document.domain + ':' + location.port);
 
-    // Emit join event to join the correct game room
+    socket.on('connect', function() {
+    //console.log('Connected to the server');
     socket.emit('join', {'game_id': '{{ game.id }}'});
+    });
 
     var form = document.querySelector("form");
     var textarea = document.querySelector("textarea[name='command']");
@@ -126,6 +161,19 @@ socket.on('player_online', function(data) {
 
 socket.on('player_offline', function(data) {
     document.getElementById("status_" + data.player_id).innerText = "Offline";
+});
+
+
+socket.on('new_entity', function(data) {
+    // Assuming you have a <tbody> element with an id of "entities-tbody" for your entities table
+    var entitiesTable = document.getElementById("entities-tbody");
+
+    // Create a new row and populate it with the entity's data
+    var newRow = entitiesTable.insertRow();
+    var nameCell = newRow.insertCell(0);
+    var healthCell = newRow.insertCell(1);
+    nameCell.innerText = data.entity_name;
+    healthCell.innerText = data.current_health;
 });
 
 
