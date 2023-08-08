@@ -4,16 +4,92 @@
 
 <style>
     .message-history {
-    height: 300px;  /* Adjust as needed */
-    overflow-y: scroll;
-    border: 1px solid #ccc;
-    padding: 10px;
-    margin-bottom: 20px;
+        height: 300px;
+        /* Adjust as needed */
+        overflow-y: scroll;
+        border: 1px solid #ccc;
+        padding: 10px;
+        margin-bottom: 20px;
+    }
+
+    .system-message {
+        color: red;
+        /* Or any style you prefer for system messages */
+    }
+
+/* Grid */
+#grid-container {
+    display: grid;
+    grid-template-columns: repeat(10, 20px);
+    grid-template-rows: repeat(10, 20px);
+    gap: 2px;
 }
 
-.system-message {
-    color: red;  /* Or any style you prefer for system messages */
+.grid-cell {
+    width: 20px;
+    height: 20px;
+    border: 1px solid #ccc;
+    position: relative;  /* Needed for the absolute positioning of the tooltip */
 }
+
+.grid-cell:hover::after {
+    content: attr(data-tooltip);  /* Use a data-tooltip attribute to set the tooltip text */
+    position: absolute;
+    left: 0;
+    top: 100%;  /* Position the tooltip below the cell */
+    padding: 5px;
+    color: #fff;
+    background-color: rgba(0, 0, 0, 0.8);
+    white-space: nowrap;  /* Prevent the tooltip text from wrapping */
+    z-index: 1;  /* Ensure the tooltip is on top of other elements */
+}
+
+
+.entity-cell {
+    background-color: red;
+}
+
+.player-cell {
+    background-color: blue;
+}
+
+/* Modal */
+.modal {
+    display: none; /* Hidden by default */
+    position: fixed; /* Stay in place */
+    padding-top: 100px; /* Location of the box */
+    left: 0;
+    top: 0;
+    width: 100%; /* Full width */
+    height: 100%; /* Full height */
+    overflow: auto; /* Enable scroll if needed */
+    background-color: rgb(0,0,0); /* Fallback color */
+    background-color: rgba(0,0,0,0.4); /* Black w/ opacity */
+}
+
+.modal-content {
+    background-color: #fefefe;
+    margin: auto;
+    padding: 20px;
+    border: 1px solid #888;
+    width: 80%;
+}
+
+.close {
+    color: #aaaaaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+}
+
+.close:hover,
+.close:focus {
+    color: #000;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+
 
 </style>
 
@@ -23,14 +99,14 @@
     <div class="message-history mb-4">
         {% for message in messages|reverse %}
         <div class="message">
-            <strong>{{ message.player.user.username }}:</strong> 
+            <strong>{{ message.player.user.username }}:</strong>
             {% if message.player.user.username == 'System' %}
-                <span class="system-message">{{ message.content }}</span>
+            <span class="system-message">{{ message.content }}</span>
             {% else %}
-                {{ message.content }}
+            {{ message.content }}
             {% endif %}
         </div>
-    {% endfor %}
+        {% endfor %}
     </div>
     <form action="{{ url_for('game_session', game_id=game.id) }}" method="post" class="mb-4">
         <div class="form-group">
@@ -40,7 +116,7 @@
     </form>
 
     <div class="row">
-        <div class="col-md-6">
+        <div class="col-md-5">
             <h3>Players in Game:</h3>
             <table class="table">
                 <thead>
@@ -62,28 +138,43 @@
             </table>
         </div>
 
-        <div class="col-md-6">
+        <div class="col-md-5">
             <h3>Entities in Game:</h3>
-            <table class="table" id="entities-tbody">
+            <table class="table">
                 <thead>
                     <tr>
                         <th>Name</th>
                         <th>Current Health</th>
+                        <th>Position</th> <!-- New column for position -->
                         <!-- You can add other attributes like Attack, Defense, etc. -->
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="entities-tbody"> <!-- Add an id to the tbody for easy JavaScript access -->
                     {% for entity_instance in entity_instances %}
-                    <tr>
+                    <tr id="entity_{{ entity_instance.id }}"> <!-- Add an id to each row for easy JavaScript access -->
                         <td>{{ entity_instance.base_entity.name }}</td>
                         <td>{{ entity_instance.current_health }}</td>
+                        <td>({{ entity_instance.position_x }}, {{ entity_instance.position_y }})</td>
+                        <!-- New column for position -->
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
+        <div id="grid-container" class="col-md-2">
+        </div>
+        <div id="status-box"></div>
+        
+        <!-- Modal for displaying entity/player details -->
+        <div id="details-modal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <p id="details-text"></p>
+            </div>
+        </div>
     </div>
 </div>
+<input type="hidden" id="grid-size" value="{{ game_state.grid_size }}">
 
 
 
@@ -93,15 +184,19 @@
 <script type="text/javascript">
     var socket = io.connect('http://' + document.domain + ':' + location.port);
 
-    socket.on('connect', function() {
+    socket.on('connect', function () {
     //console.log('Connected to the server');
-    socket.emit('join', {'game_id': '{{ game.id }}'});
-    });
+    socket.emit('join', { 'game_id': '{{ game.id }}' });
+    
+    // Fetch the initial game state after joining
+    socket.emit('fetch_game_state', { 'game_id': '{{ game.id }}' });
+});
+
 
     var form = document.querySelector("form");
     var textarea = document.querySelector("textarea[name='command']");
 
-    textarea.addEventListener('keypress', function(event) {
+    textarea.addEventListener('keypress', function (event) {
         // Check if the pressed key is the return/enter key and the shift key is not pressed
         if (event.keyCode === 13 && !event.shiftKey) {
             event.preventDefault();  // prevent newline insertion
@@ -109,59 +204,59 @@
         }
     });
 
-    form.addEventListener("submit", function(event) {
-    event.preventDefault();
+    form.addEventListener("submit", function (event) {
+        event.preventDefault();
 
-    var messageContent = textarea.value;
-    
-    // Disable textarea and send button for 3 seconds after sending a message
-    textarea.disabled = true;
-    setTimeout(function() {
-        textarea.disabled = false;
-        textarea.focus();
-    }, 3000);  // 3 seconds
+        var messageContent = textarea.value;
 
-    socket.emit('send_message', {'game_id': '{{ game.id }}', 'user': '{{ player.user.username }}', 'content': messageContent});
-    textarea.value = '';  // Clear the input field
-});
+        // Disable textarea and send button for 3 seconds after sending a message
+        textarea.disabled = true;
+        setTimeout(function () {
+            textarea.disabled = false;
+            textarea.focus();
+        }, 3000);  // 3 seconds
 
-socket.on('new_message', function(data) {
-    // Create the new message element
-    var newMessage = document.createElement("div");
-    newMessage.innerHTML = "<strong>" + data.user + ":</strong> ";
+        socket.emit('send_message', { 'game_id': '{{ game.id }}', 'user': '{{ player.user.username }}', 'content': messageContent });
+        textarea.value = '';  // Clear the input field
+    });
 
-    // Append the new message element to the message history div
-    var messageDiv = document.querySelector(".message-history");
-    messageDiv.appendChild(newMessage);
+    socket.on('new_message', function (data) {
+        // Create the new message element
+        var newMessage = document.createElement("div");
+        newMessage.innerHTML = "<strong>" + data.user + ":</strong> ";
 
-    // Scroll to the bottom immediately after appending the new message
-    messageDiv.scrollTop = messageDiv.scrollHeight;
+        // Append the new message element to the message history div
+        var messageDiv = document.querySelector(".message-history");
+        messageDiv.appendChild(newMessage);
 
-    // Type out the message content with a typewriter effect
-    var content = data.content;
-    var index = 0;
-    var typingSpeed = 10;  // Adjust the speed as needed
+        // Scroll to the bottom immediately after appending the new message
+        messageDiv.scrollTop = messageDiv.scrollHeight;
 
-    function typeCharacter() {
-        if (index < content.length) {
-            newMessage.innerHTML += content.charAt(index);
-            index++;
-            setTimeout(typeCharacter, typingSpeed);
+        // Type out the message content with a typewriter effect
+        var content = data.content;
+        var index = 0;
+        var typingSpeed = 10;  // Adjust the speed as needed
+
+        function typeCharacter() {
+            if (index < content.length) {
+                newMessage.innerHTML += content.charAt(index);
+                index++;
+                setTimeout(typeCharacter, typingSpeed);
+            }
         }
-    }
 
-    typeCharacter();
-});
+        typeCharacter();
+    });
 
-// ... existing code ...
+    // ... existing code ...
 
-socket.on('player_online', function(data) {
-    document.getElementById("status_" + data.player_id).innerText = "Online";
-});
+    socket.on('player_online', function (data) {
+        document.getElementById("status_" + data.player_id).innerText = "Online";
+    });
 
-socket.on('player_offline', function(data) {
-    document.getElementById("status_" + data.player_id).innerText = "Offline";
-});
+    socket.on('player_offline', function (data) {
+        document.getElementById("status_" + data.player_id).innerText = "Offline";
+    });
 
 
 socket.on('new_entity', function(data) {
@@ -172,9 +267,58 @@ socket.on('new_entity', function(data) {
     var newRow = entitiesTable.insertRow();
     var nameCell = newRow.insertCell(0);
     var healthCell = newRow.insertCell(1);
+    var positionCell = newRow.insertCell(2);  // New cell for the position
     nameCell.innerText = data.entity_name;
     healthCell.innerText = data.current_health;
+    positionCell.innerText = `(${data.position_x}, ${data.position_y})`;  // Fill the position cell with the coordinates
 });
+
+
+// Create the grid
+function createGrid(gridSize) {
+    var gameGrid = document.getElementById("grid-container");
+    for (var i = 0; i < gridSize; i++) {
+        for (var j = 0; j < gridSize; j++) {
+            var cell = document.createElement('div');
+            cell.classList.add('grid-cell');
+            gameGrid.appendChild(cell);
+        }
+    }
+}
+
+
+// Call the createGrid function with the initial grid size of the game
+var gridSize = document.getElementById("grid-size").value;
+createGrid(gridSize);
+
+
+socket.on('game_state_update', function(game_state) {
+    // Clear the grid
+    console.log(game_state);
+    var gameGrid = document.getElementById("grid-container");
+    while (gameGrid.firstChild) {
+        gameGrid.firstChild.remove();
+    }
+
+    // Create a new grid with the updated size
+    createGrid(game_state.grid_size);
+
+    // Color the squares for entities and players
+    game_state.entities.forEach(function(entity) {
+    var cell = gameGrid.children[entity.y * game_state.grid_size + entity.x];
+    cell.classList.add('entity-cell');
+    cell.setAttribute('data-tooltip', `(${entity.x},${entity.y}) - Entity ID: ${entity.name}_${entity.id}\nHealth: ${entity.health}`);
+});
+
+game_state.players.forEach(function(player) {
+    var cell = gameGrid.children[player.y * game_state.grid_size + player.x];
+    cell.classList.add('player-cell');
+    cell.setAttribute('data-tooltip', `(${player.x},${player.y}) - Player ID: ${player.name}\nHealth: ${player.health}`);
+});
+
+});
+
+
 
 
 </script>

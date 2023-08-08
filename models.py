@@ -40,7 +40,12 @@ class Player(db.Model):
     health = db.Column(db.Integer, nullable=False, default=100)
     strength = db.Column(db.Integer, nullable=False, default=10)
     mana = db.Column(db.Integer, nullable=False, default=50)
+    carrying_capacity = db.Column(db.Integer, nullable=False, default=10)
     
+    position_x = db.Column(db.Integer, nullable=False, default=0)
+    position_y = db.Column(db.Integer, nullable=False, default=0)
+    move_speed = db.Column(db.Integer, nullable=False, default=1)
+
     # Relationship to manage player's inventory items
     inventory_items = db.relationship('InventoryItem', backref='owner', lazy=True)
 
@@ -51,7 +56,22 @@ class Item(db.Model):
     description = db.Column(db.Text, nullable=True)
     script = db.Column(db.Text, nullable=True)  # for the command scripts
     attack_power = db.Column(db.Integer, default=0, nullable=False)
+    weight = db.Column(db.Integer, default=0, nullable=False)  # The weight of the item
+    creator_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
+ 
+
+class ItemInstance(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    item_id = db.Column(db.Integer, db.ForeignKey('item.id'), nullable=False)
+    game_context_id = db.Column(db.Integer, db.ForeignKey('game_context.id'), nullable=False)
+
+    position_x = db.Column(db.Integer, nullable=False, default=0)
+    position_y = db.Column(db.Integer, nullable=False, default=0)
+
+    # Relationship to reference the base item
+    base_item = db.relationship('Item', backref='instances', lazy=True)
+  
 
 class InventoryItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -63,6 +83,7 @@ class InventoryItem(db.Model):
     item = db.relationship('Item', backref='inventory_instances', lazy=True)
 
 
+
 class Entity(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), nullable=False)
@@ -70,10 +91,13 @@ class Entity(db.Model):
     attack = db.Column(db.Integer, default=10, nullable=False)
     defense = db.Column(db.Integer, default=5, nullable=False)
     script = db.Column(db.Text, nullable=True)  # for the command scripts or interactions
+    creator_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+
 
 class GameContext(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     game_id = db.Column(db.Integer, db.ForeignKey('game.id'), nullable=False)
+    grid_size = db.Column(db.Integer, default=10, nullable=False)
     
     # Relationship to manage entity instances in this game context
     entities = db.relationship('EntityInstance', backref='game_context', lazy=True)
@@ -82,6 +106,10 @@ class EntityInstance(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     entity_id = db.Column(db.Integer, db.ForeignKey('entity.id'), nullable=False)
     game_context_id = db.Column(db.Integer, db.ForeignKey('game_context.id'), nullable=False)
+
+    position_x = db.Column(db.Integer, nullable=False, default=0)
+    position_y = db.Column(db.Integer, nullable=False, default=0)
+    move_speed = db.Column(db.Integer, nullable=False, default=1)
     
     current_health = db.Column(db.Integer, nullable=False)
     # Add other attributes as needed (e.g., current_attack, current_defense)

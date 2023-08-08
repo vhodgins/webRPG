@@ -1,10 +1,11 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from flask_migrate import Migrate
 from models import *
 from flask_socketio import SocketIO, send, emit, join_room, leave_room
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+
 
 app = Flask(__name__)
 socketio = SocketIO(app)
@@ -24,31 +25,48 @@ def index():
     return redirect(url_for('game'))#render_template('index.html')
 
 ### Command List ###
-def spawn(tokens, user_id, role, game_id):
+def spawn(args, user_id, role, game_id):
+    if role != 'Gamemaster':
+        return ['failure', 'You do not have permission to use this command.']
 
-    if role != "Gamemaster":
-        return ['failure', 'Only Gamemasters can use the spawn command.']
+    if len(args) != 3:  # The command, the entity name, and the coordinates
+        return ['failure', 'Invalid command syntax. Use: spawn <entityname> at (<xcoord>,<ycoord>)']
 
-    entity_name = tokens[0]
+    entity_name = args[0]
+    coordinates = args[2].strip('()').split(',')  # Remove parentheses and split by comma
+
+    if len(coordinates) != 2:
+        return ['failure', 'Invalid coordinates. Use: (<xcoord>,<ycoord>)']
+
+    try:
+        x_coord = int(coordinates[0])
+        y_coord = int(coordinates[1])
+    except ValueError:
+        return ['failure', 'Coordinates must be integers.']
+
     entity = Entity.query.filter_by(name=entity_name).first()
-
     if not entity:
-        return ['failure', f"No entity named {entity_name} found."]
+        return ['failure', f'No entity named "{entity_name}" exists.']
 
     game_context = GameContext.query.filter_by(game_id=game_id).first()
 
-    # Create an EntityInstance for the specific entity in the game context
-    entity_instance = EntityInstance(entity_id=entity.id, game_context_id=game_context.id, current_health=entity.health)
+    # Check if the position is within the game context's grid
+    if x_coord < 0 or x_coord >= game_context.grid_size or y_coord < 0 or y_coord >= game_context.grid_size:
+        return ['failure', 'The position is out of bounds.']
+
+    # Check if any other entity occupies the desired position
+    existing_entity = EntityInstance.query.filter_by(game_context_id=game_context.id, position_x=x_coord, position_y=y_coord).first()
+    if existing_entity:
+        return ['failure', 'Another entity already occupies that position.']
+
+    entity_instance = EntityInstance(entity_id=entity.id, game_context_id=game_context.id, current_health=entity.health, position_x=x_coord, position_y=y_coord)
     db.session.add(entity_instance)
     db.session.commit()
 
     # Notify all players in the game session about the new entity
-    emit('new_entity', {'entity_name': entity_name, 'current_health': entity.health}, room="game_" + game_id)
+    emit('new_entity', {'entity_name': entity_name, 'current_health': entity.health,  'position_x': x_coord, 'position_y': y_coord}, room="game_" + game_id)
 
-    return ['success', f"{entity_name} has been spawned in the game!"]
-
-
-
+    return ['success', f'Entity "{entity_name}" was spawned at ({x_coord},{y_coord}).']
 
 
 command_list = {
@@ -201,7 +219,27 @@ def game_session(game_id):
     n = 10  # or however many messages you want
     messages = GameMessage.query.filter_by(game_id=game.id).order_by(GameMessage.timestamp.desc()).limit(n).all()
 
-    return render_template('game_session.html', game=game, player=player, messages=messages, players=players, entity_instances=entity_instances)
+
+    game_context_id = GameContext.query.filter_by(game_id=game_id).first().id
+    entities = EntityInstance.query.filter_by(game_context_id=game_context_id).all()
+    players = Player.query.filter_by(game_id=game_id).all()
+    entities_data = [{'id': e.id, 'name': e.base_entity.name,'x': e.position_x, 'y': e.position_y, 'health': e.current_health} for e in entities]
+    players_data = [{'id': p.id,'name':p.name, 'x': p.position_x, 'y': p.position_y, 'health': p.health} for p in players]
+    game_state = {'entities': entities_data, 'players': players_data, 'grid_size': GameContext.query.filter_by(game_id=game_id).first().grid_size}
+
+    return render_template('game_session.html', game=game, player=player, messages=messages, entities=entities, players=players, entity_instances=entity_instances, game_state=game_state)
+
+@socketio.on('fetch_game_state')
+def handle_fetch_game_state(data):
+    game_id = data['game_id']  # Replace with your actual logic
+    game_context_id = GameContext.query.filter_by(game_id=game_id).first().id
+    entities = EntityInstance.query.filter_by(game_context_id=game_context_id).all()
+    players = Player.query.filter_by(game_id=game_id).all()
+    entities_data = [{'id': e.id, 'name': e.base_entity.name,'x': e.position_x, 'y': e.position_y, 'health': e.current_health} for e in entities]
+    players_data = [{'id': p.id, 'name':p.name, 'x': p.position_x, 'y': p.position_y, 'health': p.health} for p in players]
+    game_state = {'entities': entities_data, 'players': players_data, 'grid_size': GameContext.query.filter_by(game_id=game_id).first().grid_size}
+    emit('game_state_update', game_state, room=request.sid)
+
 
 
 @limiter.limit("1 per 3 seconds")
@@ -228,12 +266,35 @@ def handle_message(data):
         if response[0] == 'failure':
             # Send the message only to the issuer
             emit('new_message', {'user': 'System', 'content': response[1]}, room=request.sid)
+
+
+            game_context_id = GameContext.query.filter_by(game_id=game_id).first().id
+            entities = EntityInstance.query.filter_by(game_context_id=game_context_id).all()
+            players = Player.query.filter_by(game_id=game_id).all()
+
+            # Convert these to a format that can be JSON serialized
+            entities_data = [{'id': e.id, 'name': e.base_entity.name, 'x': e.position_x, 'y': e.position_y, 'health': e.current_health} for e in entities]
+            players_data = [{'id': p.id, 'name':p.name,'x': p.position_x, 'y': p.position_y, 'health': p.health} for p in players]
+
+            game_state = {'entities': entities_data, 'players': players_data, 'grid_size': GameContext.query.filter_by(game_id=game_id).first().grid_size}
+            socketio.emit('game_state_update', game_state, room="game_" + game_id)
             return 
         else:
             # Send the message to all players in the game
             emit('new_message', {'user': 'System', 'content': response[1]}, room="game_" + game_id)
             resp = " - " + response[1]
-        
+                    # After spawning an entity...
+        game_context_id = GameContext.query.filter_by(game_id=game_id).first().id
+        entities = EntityInstance.query.filter_by(game_context_id=game_context_id).all()
+        players = Player.query.filter_by(game_id=game_id).all()
+
+        # Convert these to a format that can be JSON serialized
+        entities_data = [{'id': e.id,'name': e.base_entity.name, 'x': e.position_x, 'y': e.position_y, 'health': e.current_health} for e in entities]
+        players_data = [{'id': p.id, 'name':p.name, 'x': p.position_x, 'y': p.position_y, 'health': p.health} for p in players]
+
+        game_state = {'entities': entities_data, 'players': players_data, 'grid_size': GameContext.query.filter_by(game_id=game_id).first().grid_size}
+        socketio.emit('game_state_update', game_state, room="game_" + game_id)
+
 
     # If it's not a command, continue with the usual message sending logic ...
     new_message = GameMessage(game_id=game_id, player_id=current_user.id, content=message_content+resp)
@@ -280,7 +341,7 @@ def create_entity():
         attack = request.form.get('attack')
         defense = request.form.get('defense')
         
-        new_entity = Entity(name=name, health=health, attack=attack, defense=defense)
+        new_entity = Entity(name=name, health=health, attack=attack, defense=defense, creator_id=current_user.id)
         db.session.add(new_entity)
         db.session.commit()
         
@@ -288,6 +349,26 @@ def create_entity():
         return redirect(url_for('index'))  # Redirect to a suitable page, maybe a list of all entities
 
     return render_template('create_entity.html')
+
+
+@app.route('/create_item', methods=['GET','POST'])
+@login_required
+def create_item():
+    if request.method == 'POST':
+        name = request.form.get('name')
+        description = request.form.get('description')
+        script = request.form.get('script')
+        attack_power = request.form.get('attack_power')
+        weight = request.form.get('weight')
+
+        new_item = Item(name=name, description=description, script=script, attack_power=attack_power, weight=weight, creator_id=current_user.id)
+        db.session.add(new_item)
+        db.session.commit()
+
+        flash('Item created successfully!', 'success')
+        return redirect(url_for('index'))
+    return render_template('create_item.html')
+
 
 
 
