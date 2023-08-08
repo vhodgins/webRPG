@@ -221,19 +221,22 @@ def handle_message(data):
 
     tokens = message_content.split()
     command = tokens[0]
+    resp=""
 
     if command in command_list:
         response = command_list[command](tokens[1:], current_user.id, role, game_id)
         if response[0] == 'failure':
             # Send the message only to the issuer
             emit('new_message', {'user': 'System', 'content': response[1]}, room=request.sid)
+            return 
         else:
             # Send the message to all players in the game
             emit('new_message', {'user': 'System', 'content': response[1]}, room="game_" + game_id)
+            resp = " - " + response[1]
+        
 
     # If it's not a command, continue with the usual message sending logic ...
-
-    new_message = GameMessage(game_id=game_id, player_id=current_user.id, content=message_content+" - "+response[1])
+    new_message = GameMessage(game_id=game_id, player_id=current_user.id, content=message_content+resp)
     db.session.add(new_message)
     db.session.commit()
 
